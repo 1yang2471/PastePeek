@@ -1,0 +1,19 @@
+* text=auto
+
+/.gitattributes text eol=lf
+/.gitignore text eol=lf
+
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.txt text eol=lf
+
+# 第三方许可证保持上游原文，不对其尾随空格做机械改写。
+/licenses/*.txt -whitespace
+
+*.ico binary
+*.png binary
+*.exe binary

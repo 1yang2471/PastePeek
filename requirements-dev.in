@@ -1,0 +1,9 @@
+-r requirements.in
+
+pytest==9.0.3
+pyinstaller==6.20.0
+ruff==0.15.21
+pip-audit==2.10.1
+pip-tools==7.5.3
+pywinauto==0.6.9
+Pillow==12.3.0
