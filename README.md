@@ -1,4 +1,4 @@
-# PastePeek v2.0.0-rc.1
+# PastePeek v2.0.0-rc.2
 
 > 当前为最低预发布版（Pre-release）。已验证当前 Windows 单物理显示器环境；Windows 10、真实 per-monitor DPI、多物理显示器以及断电/强杀中的剪贴板写入结果尚未作兼容性承诺。
 

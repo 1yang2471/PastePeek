@@ -1,23 +1,90 @@
-"""Generate a minimal PastePeek icon (.ico) using built-in Pillow.
+"""生成 PastePeek 的 Windows 图标。
 
-If Pillow is not installed, generates a low-res .ico using raw bytes
-as a fallback.
+图标使用剪贴板、预览之眼和风险标记组成，适配托盘、窗口标题栏和 EXE
+资源管理器视图。没有 Pillow 时仍保留低分辨率原始 ICO 回退路径。
 
-Usage: python generate_icon.py  (creates assets/icon.ico)
+用法：python generate_icon.py（生成 assets/icon.ico）
 """
 
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 OUTPUT = ROOT / "assets" / "icon.ico"
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
+ICON_SIZE_PAIRS = tuple((size, size) for size in ICON_SIZES)
+
+
+def _draw_pastepeek_icon(size: int):
+    """在高分辨率画布上绘制可缩放的剪贴板预览图标。"""
+    from PIL import Image, ImageDraw
+
+    scale = 4
+    # 始终在固定高分辨率画布上绘制，再缩放到目标尺寸，避免小图标坐标越界。
+    canvas_size = 256 * scale
+    image = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    def box(left: int, top: int, right: int, bottom: int) -> tuple[int, ...]:
+        return tuple(round(value * scale) for value in (left, top, right, bottom))
+
+    def stroke(width: int) -> int:
+        return max(1, round(width * scale))
+
+    # 深色剪贴板轮廓让 16px 托盘图标仍保持清晰的外形。
+    draw.rounded_rectangle(
+        box(28, 30, 228, 236),
+        radius=round(42 * scale),
+        fill="#16324F",
+    )
+    draw.rounded_rectangle(
+        box(54, 62, 202, 218),
+        radius=round(20 * scale),
+        fill="#F8FAFC",
+    )
+
+    # 顶部夹子使用产品青绿色，和 HUD 的主要操作色保持一致。
+    draw.rounded_rectangle(
+        box(84, 20, 172, 72),
+        radius=round(22 * scale),
+        fill="#16324F",
+    )
+    draw.rounded_rectangle(
+        box(101, 27, 155, 54),
+        radius=round(13 * scale),
+        fill="#0F766E",
+    )
+
+    # 眼睛代表“预览”，中心瞳孔保留深色对比，缩小后不会糊成色块。
+    draw.ellipse(
+        box(74, 108, 182, 174),
+        fill="#D8F3EE",
+        outline="#0F766E",
+        width=stroke(9),
+    )
+    draw.ellipse(box(111, 124, 145, 158), fill="#16324F")
+    draw.ellipse(box(119, 128, 129, 138), fill="#FFFFFF")
+
+    # 纸面下方的短线暗示被预览的文本内容。
+    draw.rounded_rectangle(
+        box(84, 188, 171, 198),
+        radius=round(5 * scale),
+        fill="#9AAEBD",
+    )
+
+    # 琥珀色小标记对应风险提示，不抢占剪贴板主体的视觉重量。
+    draw.ellipse(box(176, 184, 216, 224), fill="#D97706")
+    draw.line(
+        (round(196 * scale), round(192 * scale), round(196 * scale), round(207 * scale)),
+        fill="#FFFFFF",
+        width=stroke(6),
+    )
+    draw.ellipse(box(193, 212, 199, 218), fill="#FFFFFF")
+
+    return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def _build_minimal_ico(output_path: Path):
-    """Build a valid .ico from raw bytes — no external dependencies needed.
-
-    Icon: 32x32, 16 colors, a simple blue circle on transparent background
-    representing 'risk detection' (eye/magnifier concept).
-    """
+    """在无 Pillow 时生成一个可用的低分辨率眼睛回退图标。"""
 
     # ICO file format:
     # Header: reserved(2) + type(2) + count(2)
@@ -113,30 +180,12 @@ def _build_minimal_ico(output_path: Path):
 
 
 def generate_icon(output_path: Path):
-    """Generate icon, trying Pillow first, falling back to raw bytes."""
+    """生成多尺寸透明 ICO，Pillow 不可用时回退到原始 ICO。"""
     try:
-        from PIL import Image, ImageDraw
-
-        Assets = ROOT / "assets"
-        Assets.mkdir(parents=True, exist_ok=True)
-
-        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-
-        # Outer circle (dark blue)
-        draw.ellipse([4, 4, 60, 60], fill=(27, 84, 214, 255))  # #1b54d6
-        # Inner circle (medium blue)
-        draw.ellipse([8, 8, 56, 56], fill=(37, 118, 192, 255))  # #2576c0
-        # Center (light blue highlight)
-        draw.ellipse([16, 16, 48, 48], fill=(52, 152, 217, 255))  # #3498d9
-
-        # White "eye" pupil (simplified)
-        draw.ellipse([22, 22, 42, 42], fill=(255, 255, 255, 255))
-        # Blue pupil center
-        draw.ellipse([28, 28, 36, 36], fill=(27, 84, 214, 255))
-
-        img.save(str(output_path), format="ICO", sizes=[(32, 32)])
-        print(f"Icon generated (Pillow): {output_path}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        base = _draw_pastepeek_icon(256)
+        base.save(str(output_path), format="ICO", sizes=ICON_SIZE_PAIRS)
+        print(f"Icon generated (Pillow, sizes={ICON_SIZES}): {output_path}")
 
     except ImportError:
         _build_minimal_ico(output_path)
