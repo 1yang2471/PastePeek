@@ -1,5 +1,11 @@
 # PastePeek v2.0.0-rc.2
 
+[English](README.en.md) | 简体中文
+
+[English changelog](CHANGELOG.en.md) | [中文变更日志](CHANGELOG.md)
+
+英文公开文档已提供；当前运行时 HUD 和系统托盘文案仍为简体中文。
+
 > 当前为最低预发布版（Pre-release）。已验证当前 Windows 单物理显示器环境；Windows 10、真实 per-monitor DPI、多物理显示器以及断电/强杀中的剪贴板写入结果尚未作兼容性承诺。
 
 PastePeek 是一个面向 Windows 的轻量粘贴预览工具。复制内容后，它在桌面右下角显示内容类型、当前目标应用和粘贴风险；展开 HUD 后，可切换目标场景、查看近似粘贴效果，并按需净化链接、清洗格式或合并换行。

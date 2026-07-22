@@ -1,5 +1,7 @@
 # 参与贡献
 
+[English](CONTRIBUTING.en.md) | 简体中文
+
 感谢你帮助改进 PastePeek。项目聚焦于 Windows 上的粘贴结果预览，不计划加入剪贴板历史、云同步、AI 推理或插件系统。
 
 参与讨论和提交改动时，请遵守 [社区行为准则](CODE_OF_CONDUCT.md)。

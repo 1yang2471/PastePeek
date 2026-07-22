@@ -186,6 +186,28 @@ def test_github_community_files_are_complete():
         assert path.read_text(encoding="utf-8").strip()
 
 
+def test_english_public_docs_are_complete():
+    """公开仓库必须同时提供可独立阅读的英文入口文档。"""
+    required_files = (
+        "README.en.md",
+        "CHANGELOG.en.md",
+        "SECURITY.en.md",
+        "SUPPORT.en.md",
+        "CONTRIBUTING.en.md",
+        "CODE_OF_CONDUCT.en.md",
+    )
+
+    for relative_path in required_files:
+        path = ROOT / relative_path
+        assert path.is_file()
+        assert path.read_text(encoding="utf-8").strip()
+
+    english_readme = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    assert "does not keep clipboard history" in english_readme
+    assert "does not need network access at runtime" in english_readme
+    assert "SECURITY.en.md" in english_readme
+
+
 def test_public_metadata_matches_prerelease_scope():
     """许可证署名和构建提示必须与预发布范围一致。"""
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")

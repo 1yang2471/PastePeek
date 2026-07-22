@@ -1,5 +1,7 @@
 # 支持说明
 
+[English](SUPPORT.en.md) | 简体中文
+
 ## 使用问题
 
 请先查阅 [README.md](README.md) 中的系统要求、使用方式和已知兼容边界。确认问题仍然存在后，可使用 GitHub 的错误报告模板提交 Issue。
