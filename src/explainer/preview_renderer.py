@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
+from src.i18n import DEFAULT_LANGUAGE, normalize_language, translate
+
 
 @dataclass
 class ClipboardContent:
@@ -83,10 +85,14 @@ class _PreviewHtmlSanitizer(HTMLParser):
     _BLOCKED_CONTENT_TAGS = {"script", "style", "iframe", "object"}
     _VOID_TAGS = {"br", "hr"}
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__(convert_charrefs=False)
         self.parts: list[str] = []
         self._blocked_stack: list[str] = []
+        self._language = normalize_language(language)
+
+    def _image_placeholder(self) -> str:
+        return html.escape(translate("image_placeholder", self._language))
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -98,7 +104,7 @@ class _PreviewHtmlSanitizer(HTMLParser):
             self._blocked_stack.append(tag)
             return
         if tag == "img":
-            self.parts.append("<span>[图片]</span>")
+            self.parts.append(f"<span>{self._image_placeholder()}</span>")
             return
         if tag in self._ALLOWED_TAGS:
             self.parts.append(f"<{tag}>")
@@ -110,7 +116,7 @@ class _PreviewHtmlSanitizer(HTMLParser):
         if self._blocked_stack or tag in self._BLOCKED_CONTENT_TAGS:
             return
         if tag == "img":
-            self.parts.append("<span>[图片]</span>")
+            self.parts.append(f"<span>{self._image_placeholder()}</span>")
             return
         if tag in self._ALLOWED_TAGS:
             self.parts.append(f"<{tag}>")
@@ -159,11 +165,12 @@ class _HtmlToPlainTextParser(HTMLParser):
         "pre",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self._blocked_stack: list[str] = []
         self._table_cell_index = 0
+        self._language = normalize_language(language)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -187,7 +194,7 @@ class _HtmlToPlainTextParser(HTMLParser):
                 self.parts.append("\t")
             self._table_cell_index += 1
         elif tag == "img":
-            self.parts.append("[图片]")
+            self.parts.append(translate("image_placeholder", self._language))
         elif tag in self._PARAGRAPH_TAGS:
             self._ensure_newlines(2)
 
@@ -266,6 +273,8 @@ class PreviewRenderer:
         content: ClipboardContent,
         target: str,
         preview_data: dict | None = None,
+        *,
+        language: str = DEFAULT_LANGUAGE,
     ) -> RenderedPreview:
         """Render a preview for ``content`` pasted into ``target``.
 
@@ -278,10 +287,11 @@ class PreviewRenderer:
         Returns:
             RenderedPreview with HTML, render mode, summary and risks.
         """
+        language = normalize_language(language)
         try:
-            return self._render_safe(content, target, preview_data)
+            return self._render_safe(content, target, preview_data, language)
         except Exception:
-            return self._fallback_checklist(content, target, preview_data)
+            return self._fallback_checklist(content, target, preview_data, language)
 
     # ── Internal dispatch ──────────────────────────────────────────────
 
@@ -290,21 +300,22 @@ class PreviewRenderer:
         content: ClipboardContent,
         target: str,
         preview_data: dict | None,
+        language: str,
     ) -> RenderedPreview:
-        summary, risks = self._extract_summary_and_risks(preview_data)
+        summary, risks = self._extract_summary_and_risks(preview_data, language)
 
         if target == "chrome":
-            html_preview = self._render_chrome(content)
+            html_preview = self._render_chrome(content, language)
         elif target == "markdown_editor":
-            html_preview = self._render_markdown(content)
+            html_preview = self._render_markdown(content, language)
         elif target == "terminal":
-            html_preview = self._render_terminal(content)
+            html_preview = self._render_terminal(content, language)
         elif target == "code_editor":
-            html_preview = self._render_code_editor(content)
+            html_preview = self._render_code_editor(content, language)
         elif target in _LOW_FIDELITY_TARGETS:
-            html_preview = self._render_structured_checklist(content, target)
+            html_preview = self._render_structured_checklist(content, target, language)
         else:
-            html_preview = self._render_unknown(content)
+            html_preview = self._render_unknown(content, language)
 
         is_rendered = target in _HIGH_FIDELITY_TARGETS
         return RenderedPreview(
@@ -319,75 +330,82 @@ class PreviewRenderer:
         content: ClipboardContent,
         target: str,
         preview_data: dict | None,
+        language: str,
     ) -> RenderedPreview:
         """Graceful fallback when a real render fails."""
-        summary, risks = self._extract_summary_and_risks(preview_data)
+        summary, risks = self._extract_summary_and_risks(preview_data, language)
         return RenderedPreview(
-            html=self._render_structured_checklist(content, target),
+            html=self._render_structured_checklist(content, target, language),
             is_rendered=False,
-            summary=summary or "预览生成失败，已切换为结构化清单",
-            risks=risks or _DEFAULT_RISKS,
+            summary=summary or translate("preview_failed", language),
+            risks=risks or self._default_risks(language),
         )
 
     # ── High-fidelity renderers ────────────────────────────────────────
 
-    def _render_chrome(self, content: ClipboardContent) -> str:
+    def _render_chrome(self, content: ClipboardContent, language: str) -> str:
         """Chrome can render the raw HTML directly."""
         source = (content.html or content.text).strip()
         if not source:
-            return self._wrap_html("<p style='color:#888;'>（无内容）</p>")
+            return self._wrap_html(
+                f"<p style='color:#888;'>{html.escape(translate('preview_empty', language))}</p>"
+            )
 
         # If we only have plain text, present it as a simple document.
         if not content.html:
             return self._wrap_html(f"<pre style='white-space:pre-wrap;'>{html.escape(source)}</pre>")
 
-        sanitizer = _PreviewHtmlSanitizer()
+        sanitizer = _PreviewHtmlSanitizer(language)
         sanitizer.feed(source)
         sanitizer.close()
         return self._wrap_html(sanitizer.get_html())
 
-    def _render_markdown(self, content: ClipboardContent) -> str:
+    def _render_markdown(self, content: ClipboardContent, language: str) -> str:
         """Render as Markdown source (HTML → Markdown if HTML is present)."""
         if content.html:
-            md = HtmlToMarkdown().convert(content.html)
+            md = HtmlToMarkdown(language=language).convert(content.html)
         else:
             md = content.text
 
-        md = md.strip() or "（无内容）"
+        md = md.strip() or translate("preview_empty", language)
         escaped = html.escape(md).replace("\n", "<br>")
         body = (
             "<div style='color:#666; font-size:9pt; margin-bottom:4px;'>"
-            "Markdown 源码预览</div>"
+            f"{html.escape(translate('markdown_preview', language))}</div>"
             f"<pre style='white-space:pre-wrap; word-wrap:break-word; margin:0;'>"
             f"{escaped}</pre>"
         )
         return self._wrap_html(body)
 
-    def _render_terminal(self, content: ClipboardContent) -> str:
+    def _render_terminal(self, content: ClipboardContent, language: str) -> str:
         """Terminal: plain text, monospaced, newlines preserved."""
-        text = self._extract_plain_text(content)
+        text = self._extract_plain_text(content, language)
         if not text:
-            return self._wrap_html("<p style='color:#888;'>（无内容）</p>")
+            return self._wrap_html(
+                f"<p style='color:#888;'>{html.escape(translate('preview_empty', language))}</p>"
+            )
 
         escaped = html.escape(text).replace("\n", "<br>")
         body = (
             "<div style='color:#666; font-size:9pt; margin-bottom:4px;'>"
-            "终端预览（等宽字体）</div>"
+            f"{html.escape(translate('terminal_preview', language))}</div>"
             f"<pre style='white-space:pre-wrap; word-wrap:break-word; font-family:Consolas,monospace; margin:0;'>"
             f"{escaped}</pre>"
         )
         return self._wrap_html(body)
 
-    def _render_code_editor(self, content: ClipboardContent) -> str:
+    def _render_code_editor(self, content: ClipboardContent, language: str) -> str:
         """Code editor: monospaced code block, indentation preserved."""
-        text = self._extract_plain_text(content)
+        text = self._extract_plain_text(content, language)
         if not text:
-            return self._wrap_html("<p style='color:#888;'>（无内容）</p>")
+            return self._wrap_html(
+                f"<p style='color:#888;'>{html.escape(translate('preview_empty', language))}</p>"
+            )
 
         escaped = html.escape(text).replace("\n", "<br>")
         body = (
             "<div style='color:#666; font-size:9pt; margin-bottom:4px;'>"
-            "代码编辑器预览</div>"
+            f"{html.escape(translate('code_preview', language))}</div>"
             f"<pre style='white-space:pre-wrap; word-wrap:break-word; font-family:Consolas,monospace; background:#f5f5f5; padding:4px; border-radius:3px; margin:0;'>"
             f"{escaped}</pre>"
         )
@@ -395,34 +413,39 @@ class PreviewRenderer:
 
     # ── Low-fidelity structured checklists ─────────────────────────────
 
-    def _render_structured_checklist(self, content: ClipboardContent, target: str) -> str:
+    def _render_structured_checklist(
+        self, content: ClipboardContent, target: str, language: str
+    ) -> str:
         """Build a structured checklist for low-fidelity targets."""
         if target == "word":
-            return self._render_word_checklist(content)
+            return self._render_word_checklist(content, language)
         if target == "presentation":
-            return self._render_presentation_checklist(content)
+            return self._render_presentation_checklist(content, language)
         if target == "chat_app":
-            return self._render_chat_checklist(content)
+            return self._render_chat_checklist(content, language)
         if target == "spreadsheet":
-            return self._render_spreadsheet_checklist(content)
-        return self._render_unknown(content)
+            return self._render_spreadsheet_checklist(content, language)
+        return self._render_unknown(content, language)
 
-    def _render_word_checklist(self, content: ClipboardContent) -> str:
+    def _render_word_checklist(self, content: ClipboardContent, language: str) -> str:
         retained = [
-            "纯文本字符",
-            "基本段落结构",
-            "部分加粗/斜体",
+            "Plain-text characters" if language == "en-US" else "纯文本字符",
+            "Basic paragraph structure" if language == "en-US" else "基本段落结构",
+            "Some bold/italic styling" if language == "en-US" else "部分加粗/斜体",
         ]
         lost = [
-            "复杂列表缩进",
-            "HTML 表格样式",
-            "内联 CSS 样式",
+            "Complex list indentation" if language == "en-US" else "复杂列表缩进",
+            "HTML table styling" if language == "en-US" else "HTML 表格样式",
+            "Inline CSS styling" if language == "en-US" else "内联 CSS 样式",
         ]
-        return self._build_checklist("Word", "保留的结构", retained, "可能丢失的格式", lost)
+        return self._build_checklist(
+            "Word", translate("kept_structure", language), retained,
+            translate("lost_format", language), lost, language
+        )
 
-    def _render_presentation_checklist(self, content: ClipboardContent) -> str:
-        outline = self._extract_outline(content)
-        lines = ["<b>幻灯片大纲</b>"]
+    def _render_presentation_checklist(self, content: ClipboardContent, language: str) -> str:
+        outline = self._extract_outline(content, language)
+        lines = [f"<b>{html.escape(translate('slide_outline', language))}</b>"]
         for item in outline[:8]:
             lines.append(f"• {html.escape(item)}")
         if len(outline) > 8:
@@ -430,42 +453,42 @@ class PreviewRenderer:
         body = "<br>".join(lines)
         return self._wrap_html(body)
 
-    def _render_chat_checklist(self, content: ClipboardContent) -> str:
-        text = self._extract_plain_text(content)
-        snippet = text[:300].strip() or "（无内容）"
+    def _render_chat_checklist(self, content: ClipboardContent, language: str) -> str:
+        text = self._extract_plain_text(content, language)
+        snippet = text[:300].strip() or translate("preview_empty", language)
         escaped = html.escape(snippet).replace("\n", "<br>")
         body = (
-            "<b>聊天应用预览</b><br>"
+            f"<b>{html.escape(translate('chat_preview', language))}</b><br>"
             f"<div style='white-space:pre-wrap; word-wrap:break-word; margin-top:4px;'>"
             f"{escaped}</div>"
             "<div style='color:#666; font-size:9pt; margin-top:4px;'>"
-            "提示：部分格式可能转为纯文本或文件</div>"
+            f"{html.escape(translate('chat_hint', language))}</div>"
         )
         return self._wrap_html(body)
 
-    def _render_spreadsheet_checklist(self, content: ClipboardContent) -> str:
-        rows = self._estimate_table_rows(content)
+    def _render_spreadsheet_checklist(self, content: ClipboardContent, language: str) -> str:
+        rows = self._estimate_table_rows(content, language)
         body = (
-            "<b>电子表格结构说明</b><br>"
-            f"预计行数：约 {rows} 行<br>"
-            "列映射：依赖 Tab/逗号分隔符<br>"
+            f"<b>{html.escape(translate('spreadsheet_info', language))}</b><br>"
+            f"{html.escape(translate('estimated_rows', language, rows=rows))}<br>"
+            f"{html.escape(translate('column_mapping', language))}<br>"
             "<span style='color:#666; font-size:9pt;'>"
-            "风险：多列可能错位，单元格内换行会拆分</span>"
+            f"{html.escape(translate('spreadsheet_risk', language))}</span>"
         )
         return self._wrap_html(body)
 
-    def _render_unknown(self, content: ClipboardContent) -> str:
-        text = self._extract_plain_text(content)[:300] or "（无内容）"
+    def _render_unknown(self, content: ClipboardContent, language: str) -> str:
+        text = self._extract_plain_text(content, language)[:300] or translate("preview_empty", language)
         escaped = html.escape(text).replace("\n", "<br>")
         return self._wrap_html(
-            f"<b>未知目标预览</b><br>"
+            f"<b>{html.escape(translate('unknown_preview', language))}</b><br>"
             f"<pre style='white-space:pre-wrap; margin:0;'>{escaped}</pre>"
         )
 
     # ── Helpers ────────────────────────────────────────────────────────
 
     def _extract_summary_and_risks(
-        self, preview_data: dict | None
+        self, preview_data: dict | None, language: str
     ) -> tuple[str, list[str]]:
         if preview_data:
             summary = preview_data.get("summary", "")
@@ -473,27 +496,46 @@ class PreviewRenderer:
         else:
             summary, risks = "", []
         if not summary:
-            summary = _DEFAULT_SUMMARY
+            summary = translate("preview_ready", language)
         if not risks:
-            risks = list(_DEFAULT_RISKS)
+            risks = self._default_risks(language)
         return summary, risks[:3]
 
-    def _extract_plain_text(self, content: ClipboardContent) -> str:
+    @staticmethod
+    def _default_risks(language: str) -> list[str]:
+        return [
+            translate("default_preview_risk_1", language),
+            translate("default_preview_risk_2", language),
+        ]
+
+    def _extract_plain_text(
+        self,
+        content: ClipboardContent,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> str:
         if content.text:
             return content.text
         if content.html:
-            return HtmlToMarkdown(strip=True).convert(content.html)
+            return HtmlToMarkdown(strip=True, language=language).convert(content.html)
         return ""
 
-    def _extract_outline(self, content: ClipboardContent) -> list[str]:
-        text = self._extract_plain_text(content).strip()
+    def _extract_outline(
+        self,
+        content: ClipboardContent,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> list[str]:
+        text = self._extract_plain_text(content, language).strip()
         if not text:
             return []
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         return lines
 
-    def _estimate_table_rows(self, content: ClipboardContent) -> int:
-        text = self._extract_plain_text(content)
+    def _estimate_table_rows(
+        self,
+        content: ClipboardContent,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> int:
+        text = self._extract_plain_text(content, language)
         if not text:
             return 0
         return max(1, len([line for line in text.splitlines() if line.strip()]))
@@ -505,11 +547,12 @@ class PreviewRenderer:
         kept: list[str],
         lost_label: str,
         lost: list[str],
+        language: str = DEFAULT_LANGUAGE,
     ) -> str:
         kept_items = "<br>".join(f"✓ {html.escape(item)}" for item in kept)
         lost_items = "<br>".join(f"✗ {html.escape(item)}" for item in lost)
         body = (
-            f"<b>{html.escape(title)} 粘贴清单</b><br><br>"
+            f"<b>{html.escape(title)} {'paste checklist' if language == 'en-US' else '粘贴清单'}</b><br><br>"
             f"<div style='color:#00aa55;'>{html.escape(kept_label)}</div>"
             f"<div style='margin-left:8px;'>{kept_items}</div><br>"
             f"<div style='color:#D32F2F;'>{html.escape(lost_label)}</div>"
@@ -535,11 +578,17 @@ class HtmlToMarkdown:
     code, pre, blockquote, table.
     """
 
-    def __init__(self, strip: bool = False):
+    def __init__(
+        self,
+        strip: bool = False,
+        *,
+        language: str = DEFAULT_LANGUAGE,
+    ):
         """Args:
             strip: If True, return plain text instead of Markdown.
         """
         self.strip = strip
+        self._language = normalize_language(language)
 
     def convert(self, html_text: str) -> str:
         text = html_text
@@ -605,7 +654,7 @@ class HtmlToMarkdown:
         return text
 
     def _plain_text(self, html_text: str) -> str:
-        parser = _HtmlToPlainTextParser()
+        parser = _HtmlToPlainTextParser(self._language)
         parser.feed(html_text)
         parser.close()
         return parser.get_text()

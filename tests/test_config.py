@@ -88,6 +88,7 @@ class TestConfigDefaults:
         assert config["default_target"] == "word"
         assert config["ui_width"] == hud_window._W
         assert config["usage_tracking_enabled"] is False
+        assert config["language"] == "zh-CN"
 
 
 class TestConfigReadWrite:
@@ -114,6 +115,7 @@ class TestConfigReadWrite:
         assert loaded["default_target"] == "code_editor"
         assert loaded["ui_width"] == 350
         assert loaded["usage_tracking_enabled"] is False
+        assert loaded["language"] == "zh-CN"
 
     def test_missing_fields_use_defaults(self, temp_config):
         temp_config.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +132,7 @@ class TestConfigReadWrite:
         assert loaded["default_target"] == "word"
         assert loaded["ui_width"] == hud_window._W
         assert loaded["usage_tracking_enabled"] is False
+        assert loaded["language"] == "zh-CN"
 
     def test_corrupt_file_falls_back_to_defaults(self, temp_config):
         temp_config.parent.mkdir(parents=True, exist_ok=True)

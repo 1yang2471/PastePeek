@@ -5,7 +5,7 @@ def test_public_version_is_release_candidate():
     """首次公开版本必须使用预发布版本号。"""
     from src.version import __version__
 
-    assert __version__ == "2.0.0-rc.2"
+    assert __version__ == "2.0.0-rc.3"
 
 
 def test_build_uses_windows_version_resource_with_public_metadata(tmp_path):

@@ -1,4 +1,4 @@
-# PastePeek v2.0.0-rc.2
+# PastePeek v2.0.0-rc.3
 
 [简体中文](README.md) | English
 
@@ -10,7 +10,7 @@ PastePeek is a lightweight Windows clipboard paste-preview tool. After you copy 
 
 ![PastePeek expanded HUD at 300px](assets/hud-expanded-300.png)
 
-The current release ships Chinese HUD and tray text. This file provides the English public project documentation without changing runtime behavior.
+The runtime defaults to Simplified Chinese and can switch to English from the HUD or tray. The English mode does not translate clipboard content or change safety rules.
 
 ## Why PastePeek
 
@@ -37,6 +37,12 @@ PastePeek does not keep clipboard history, upload content, or use an AI service.
 - Runs as a portable single-file EXE with no installer.
 - Supports a system tray lifecycle, HUD show/hide, and explicit exit.
 - Supports optional per-user startup for the portable EXE, with silent tray residency after sign-in.
+
+## Runtime Language
+
+- The default language is Simplified Chinese. Choose English from the HUD `More` menu or the tray `Language` menu.
+- HUD, predictions, previews, active-operation feedback, and tray text switch immediately. User clipboard text, HTML, Markdown, code, and URL parameters remain unchanged.
+- The choice is stored in `%LOCALAPPDATA%\PastePeek\config.json` and restored on the next launch. Missing or invalid values fall back to Simplified Chinese.
 
 ## Download and Run
 

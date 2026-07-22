@@ -213,3 +213,46 @@ def test_rendered_preview_text_is_not_hidden_below_the_viewport(
     assert hud._preview.verticalScrollBar().maximum() == 0
 
     hud.close()
+
+
+def test_english_word_checklist_is_not_clipped_at_300px(
+    qapp, tmp_path, monkeypatch
+):
+    """英文 Word 清单的最后一行不能被隐藏在无滚动条的预览区下方。"""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from src.explainer.outcome_predictor import OutcomePredictor
+    from src.ui import hud_window
+
+    config_dir = tmp_path / "config-en-word-preview"
+    config_dir.mkdir()
+    config_path = config_dir / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "first_run": False,
+                "ui_width": 300,
+                "language": "en-US",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hud_window, "_POS_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(hud_window, "_POS_CONFIG_PATH", str(config_path))
+
+    hud = hud_window.HudWindow()
+    hud.show_at_bottom_right()
+    output = OutcomePredictor().generate("plain_text", "word", language="en-US")
+    output.raw_text = "https://example.com/path?utm_source=codex&id=42"
+    output.primary_action = "clean_url"
+    output.available_actions = ["clean_url"]
+    hud.update_result(output)
+    qapp.processEvents()
+    QTest.mouseClick(hud, Qt.MouseButton.LeftButton, pos=QPoint(280, 18))
+    qapp.processEvents()
+
+    scrollbar = hud._preview.verticalScrollBar()
+    assert scrollbar.maximum() == 0 or scrollbar.isVisible()
+
+    hud.close()

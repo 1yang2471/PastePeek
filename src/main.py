@@ -60,21 +60,30 @@ def main():
     hud = HudWindow(tracker=tracker)
     hud.show_at_bottom_right(visible=not options.background)
 
+    # App、HUD 和托盘共享 HUD 从本地配置加载的语言；默认仍为简体中文。
+    paste_peek = PastePeekApp(default_target=hud.default_target())
+    paste_peek.set_language(hud.language())
+    # 空字符串保留自动检测，非空值恢复上次手动场景。
+    paste_peek.set_manual_target(hud.preferred_target())
+
     # 托盘接管 HUD 显隐；只有显式退出才结束后台监听。
     startup = StartupManager(
         Path(sys.executable),
         frozen=bool(getattr(sys, "frozen", False)),
         registry=WindowsRunRegistry(),
     )
-    tray = TrayController(hud, app_icon, startup_manager=startup)
+    tray = TrayController(
+        hud,
+        app_icon,
+        startup_manager=startup,
+        language=hud.language(),
+    )
     tray.exit_requested.connect(app.quit)
+    tray.language_selected.connect(hud.set_language)
+    hud.language_changed.connect(paste_peek.set_language)
+    hud.language_changed.connect(tray.set_language)
     tray.start()
     instance.activation_requested.connect(tray.show_hud)
-
-    # Create clipboard monitor
-    paste_peek = PastePeekApp(default_target=hud.default_target())
-    # 空字符串保留自动检测，非空值恢复上次手动场景。
-    paste_peek.set_manual_target(hud.preferred_target())
 
     # Connect: clipboard change → HUD update
     paste_peek.analysis_ready.connect(hud.update_result)

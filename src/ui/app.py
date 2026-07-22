@@ -17,6 +17,7 @@ from src.clipboard.listener import ClipboardListener
 from src.content_safety import detect_protected_content_type
 from src.detector.target_detector import TargetDetector
 from src.explainer.outcome_predictor import OutcomePredictor
+from src.i18n import DEFAULT_LANGUAGE, normalize_language, translate
 from src.listener.window_hook import WindowFocusMonitor
 from src.manipulator.text_toolkit import (
     ClipboardBusyError,
@@ -207,6 +208,7 @@ class PastePeekApp(QObject):
             target_detector if target_detector is not None else TargetDetector()
         )
         self._deep_analyzer = DeepAnalyzer()
+        self._language = DEFAULT_LANGUAGE
 
         # Remember last clipboard + prediction for target-switch re-analysis
         self._last_text = ""
@@ -286,10 +288,14 @@ class PastePeekApp(QObject):
         self._last_target = target
 
         # 3. Outcome prediction (content_type × target, <1ms)
-        output = self._predictor.generate(content_type, target=target)
+        output = self._predictor.generate(
+            content_type,
+            target=target,
+            language=self._language,
+        )
 
         if current_binary and not current_text and not current_html:
-            self._apply_binary_only_state(output)
+            self._apply_binary_only_state(output, self._language)
 
         # 4. Deep analysis metadata (structural fingerprint, ~0.2ms)
         deep = self._deep_analyzer.analyze(html=current_html or "", text=current_text)
@@ -330,13 +336,17 @@ class PastePeekApp(QObject):
         return self.check_clipboard()
 
     @staticmethod
-    def _apply_binary_only_state(output: AppOutput) -> None:
+    def _apply_binary_only_state(
+        output: AppOutput,
+        language: str = DEFAULT_LANGUAGE,
+    ) -> None:
         '''统一非文本快照的用户说明和安全操作状态。'''
-        output.content_type_label = '非文本'
-        output.prediction = '当前剪贴板包含图片、文件或音频，PastePeek 不会修改此内容'
-        output.why = '非文本内容由目标应用直接处理'
-        output.suggestion = '请在目标应用中粘贴后确认结果'
-        output.breakdown = ['暂不提供图片、文件或音频的效果预览']
+        language = normalize_language(language)
+        output.content_type_label = translate("non_text_tag", language)
+        output.prediction = translate("non_text_prediction", language)
+        output.why = translate("non_text_why", language)
+        output.suggestion = translate("non_text_suggestion", language)
+        output.breakdown = [translate("non_text_breakdown", language)]
         output.preview_data = {
             'summary': output.prediction,
             'risks': output.breakdown,
@@ -353,6 +363,7 @@ class PastePeekApp(QObject):
         output = self._predictor.generate(
             self._last_content_type,
             target=target,
+            language=self._language,
         )
         output.is_new_clipboard = False
 
@@ -377,7 +388,7 @@ class PastePeekApp(QObject):
             self._recompute_action(output)
 
         if output.has_binary and not output.raw_text and not output.raw_html:
-            self._apply_binary_only_state(output)
+            self._apply_binary_only_state(output, self._language)
         self._last_output = output
         self.analysis_ready.emit(output)
 
@@ -439,6 +450,21 @@ class PastePeekApp(QObject):
             return
         self._refresh_prediction_for_target(target)
 
+    def language(self) -> str:
+        """返回当前运行时语言。"""
+        return self._language
+
+    def set_language(self, language: str) -> str:
+        """切换生成文案的语言，并基于缓存结果立即重发一次。"""
+        normalized = normalize_language(language)
+        if normalized == self._language:
+            return normalized
+        self._language = normalized
+        if self._last_output is not None:
+            target = self._last_target or self._last_output.target or self._default_target
+            self._refresh_prediction_for_target(target)
+        return normalized
+
     def on_action_triggered(self, action_type: str) -> tuple[bool, str]:
         """Execute a clipboard manipulation action and refresh pipeline.
 
@@ -447,14 +473,14 @@ class PastePeekApp(QObject):
         """
         known_actions = {"strip_formats", "clean_url", "merge_lines"}
         if action_type not in known_actions:
-            return False, f"未知操作: {action_type}"
+            return False, translate("unknown_action", self._language, action=action_type)
 
         if self._last_output is None or action_type not in self._last_output.available_actions:
-            return False, "当前内容不适用此操作，已保留原剪贴板"
+            return False, translate("not_applicable", self._language)
 
         current = self._listener.read()
         if not current.read_succeeded:
-            return False, "无法确认剪贴板当前内容，请稍后重试"
+            return False, translate("clipboard_unavailable", self._language)
         if (
             (current.text or "") != self._last_text
             or current.html != self._last_html
@@ -467,21 +493,30 @@ class PastePeekApp(QObject):
                 and current.sequence_number != self._last_sequence
             )
         ):
-            return False, "剪贴板内容已变化，请查看最新预览后重试"
+            return False, translate("sequence_changed", self._language)
         if (
             self._last_sequence is None
             or current.sequence_number is None
             or current.sequence_number <= 0
         ):
-            return False, "无法确认剪贴板版本，请稍后重试"
+            return False, translate("sequence_unavailable", self._language)
 
         try:
             if action_type == "strip_formats":
-                ok, msg = strip_formats(expected_sequence=self._last_sequence)
+                ok, msg = strip_formats(
+                    expected_sequence=self._last_sequence,
+                    language=self._language,
+                )
             elif action_type == "clean_url":
-                ok, msg = clean_url(expected_sequence=self._last_sequence)
+                ok, msg = clean_url(
+                    expected_sequence=self._last_sequence,
+                    language=self._language,
+                )
             elif action_type == "merge_lines":
-                ok, msg = merge_lines(expected_sequence=self._last_sequence)
+                ok, msg = merge_lines(
+                    expected_sequence=self._last_sequence,
+                    language=self._language,
+                )
         except ClipboardBusyError as e:
             return False, str(e)
         except EmptyContentError as e:

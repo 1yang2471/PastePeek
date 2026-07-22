@@ -1,7 +1,9 @@
-"""使用 Windows UIA 验收便携 EXE 的托盘生命周期。"""
+"""使用 Windows UIA 验收便携 EXE 的中英文托盘生命周期。"""
 
+import json
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +13,11 @@ from pywinauto import Desktop, mouse
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / "dist" / "PastePeek.exe"
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.i18n import DEFAULT_LANGUAGE, translate  # noqa: E402
 
 
 def wait_until(
@@ -55,7 +62,7 @@ def visible_window():
     return Desktop(backend="uia").window(handle=handles[0])
 
 
-def close_button(window):
+def close_button(window, language: str = DEFAULT_LANGUAGE):
     """悬停 HUD 后定位关闭按钮。"""
     rect = window.rectangle()
     mouse.move(coords=(rect.left - 20, rect.top - 20))
@@ -64,18 +71,27 @@ def close_button(window):
 
     def locate():
         for control in window.descendants(control_type="Button"):
-            if control.element_info.name == "隐藏 HUD" and control.is_visible():
+            if (
+                control.element_info.name
+                == translate("hide_hud_accessible", language)
+                and control.is_visible()
+            ):
                 return control
         return None
 
     return wait_until("HUD 关闭按钮", locate)
 
 
-def isolated_environment() -> dict[str, str]:
+def isolated_environment(language: str) -> dict[str, str]:
     """使用隔离配置，避免修改用户的 HUD 偏好。"""
     environment = os.environ.copy()
-    state = ROOT / ".cache" / "tray_acceptance_state"
-    state.mkdir(parents=True, exist_ok=True)
+    state = ROOT / ".cache" / f"tray_acceptance_state-{language}"
+    config_dir = state / "PastePeek"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(
+        json.dumps({"language": language}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     environment["LOCALAPPDATA"] = str(state)
     return environment
 
@@ -109,14 +125,9 @@ def launch_secondary(environment: dict[str, str]) -> None:
         raise RuntimeError(f"手动第二实例退出码异常：{secondary.returncode}")
 
 
-def main() -> None:
-    """执行后台启动、两次唤醒和关闭隐藏验收。"""
-    if not EXE.exists():
-        raise FileNotFoundError(f"缺少便携 EXE：{EXE}")
-    if visible_pastepeek_handles():
-        raise RuntimeError("验收前已有可见 PastePeek 窗口")
-
-    environment = isolated_environment()
+def run_scenario(language: str) -> None:
+    """以指定语言执行后台启动、唤醒和隐藏验收。"""
+    environment = isolated_environment(language)
     primary: subprocess.Popen | None = None
     try:
         primary = subprocess.Popen(
@@ -135,7 +146,7 @@ def main() -> None:
         window = wait_until("第二次启动恢复 HUD", visible_window)
         first_handle = window.handle
 
-        close_button(window).click_input()
+        close_button(window, language).click_input()
         wait_until("关闭按钮隐藏 HUD", lambda: not visible_pastepeek_handles())
         if primary.poll() is not None:
             raise AssertionError("隐藏 HUD 后主实例不应退出")
@@ -149,13 +160,24 @@ def main() -> None:
 
         print(
             "tray_acceptance=ok "
-            f"primary_pid={primary.pid} hud_handle={first_handle}"
+            f"language={language} primary_pid={primary.pid} hud_handle={first_handle}"
         )
     finally:
         stop_process_tree(primary)
 
     wait_until("验收进程清理", lambda: not visible_pastepeek_handles())
-    print("tray_acceptance_cleanup=ok")
+    print(f"tray_acceptance_cleanup=ok language={language}")
+
+
+def main() -> None:
+    """分别验收默认中文与持久化英文的托盘生命周期。"""
+    if not EXE.exists():
+        raise FileNotFoundError(f"缺少便携 EXE：{EXE}")
+    if visible_pastepeek_handles():
+        raise RuntimeError("验收前已有可见 PastePeek 窗口")
+
+    for language in (DEFAULT_LANGUAGE, "en-US"):
+        run_scenario(language)
 
 
 if __name__ == "__main__":

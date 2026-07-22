@@ -30,7 +30,15 @@ from PySide6.QtWidgets import (
 )
 
 from src.explainer.preview_renderer import ClipboardContent, PreviewRenderer
-from src.models.types import CONTENT_TYPES, TARGET_LABELS, AppOutput
+from src.i18n import (
+    DEFAULT_LANGUAGE,
+    content_type_label,
+    normalize_language,
+    risk_label,
+    target_label,
+    translate,
+)
+from src.models.types import TARGET_LABELS, AppOutput
 from src.ui.icons import lucide_icon
 from src.usage.tracker import UsageTracker
 
@@ -138,10 +146,12 @@ class TargetIconBar(QFrame):
     """
 
     target_selected = Signal(str)
+    language_selected = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._current_target = ""
+        self._language = DEFAULT_LANGUAGE
         self._buttons: dict[str, QPushButton] = {}
         self._more_btn: QPushButton | None = None
         self._setup_ui()
@@ -162,7 +172,7 @@ class TargetIconBar(QFrame):
 
         self._more_btn = QPushButton("…")
         self._more_btn.setFixedSize(28, 26)
-        self._more_btn.setToolTip("更多目标")
+        self._more_btn.setToolTip(translate("more_targets", self._language))
         self._more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._more_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._more_btn.setFont(self._font(12, False))
@@ -179,7 +189,7 @@ class TargetIconBar(QFrame):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setFont(self._font(9, False))
-        btn.setToolTip(TARGET_LABELS.get(target, label))
+        btn.setToolTip(target_label(target, self._language))
         btn.clicked.connect(lambda _checked=False, t=target: self._select(t))
         self._update_button_appearance(btn, False)
         return btn
@@ -203,6 +213,15 @@ class TargetIconBar(QFrame):
             self._more_btn,
             self._current_target in self._remaining_targets(),
         )
+
+    def set_language(self, language: str) -> None:
+        """刷新目标按钮、提示和语言菜单使用的语言。"""
+        self._language = normalize_language(language)
+        if self._more_btn is not None:
+            self._more_btn.setToolTip(translate("more_targets", self._language))
+        for target, button in self._buttons.items():
+            button.setText(target_label(target, self._language, compact=True))
+            button.setToolTip(target_label(target, self._language))
 
     def resizeEvent(self, event):
         """在紧凑宽度下隐藏次要目标，避免按钮被压缩。"""
@@ -291,7 +310,17 @@ class TargetIconBar(QFrame):
                 height: 1px; background: {_CLR_BORDER}; margin: 2px 8px;
             }}
         """)
-        auto_action = menu.addAction("自动检测")
+        language_menu = menu.addMenu(translate("language_menu", self._language))
+        for language, key in (("zh-CN", "language_zh"), ("en-US", "language_en")):
+            action = language_menu.addAction(translate(key, self._language))
+            action.setCheckable(True)
+            action.setChecked(language == self._language)
+            action.triggered.connect(
+                lambda _checked=False, value=language: self.language_selected.emit(value)
+            )
+        menu.addSeparator()
+
+        auto_action = menu.addAction(translate("auto_detect", self._language))
         auto_action.setCheckable(True)
         auto_action.setChecked(not self._current_target)
         auto_action.triggered.connect(
@@ -299,7 +328,7 @@ class TargetIconBar(QFrame):
         )
         menu.addSeparator()
         for target in self._remaining_targets():
-            label = TARGET_LABELS.get(target, target)
+            label = target_label(target, self._language)
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(target == self._current_target)
@@ -342,6 +371,7 @@ class HudWindow(QFrame):
     target_override_requested = Signal(str)   # user selected target from icon bar
     action_triggered = Signal(str)            # user clicked an action button
     close_requested = Signal()                # 用户请求关闭 HUD
+    language_changed = Signal(str)            # 运行时语言变化
 
     def __init__(self, parent: QWidget | None = None, tracker: UsageTracker | None = None):
         super().__init__(parent)
@@ -360,6 +390,7 @@ class HudWindow(QFrame):
         self._tip_frame: QFrame | None = None
         self._width = _W
         self._config: dict = {}
+        self._language = DEFAULT_LANGUAGE
         self._current_action = ""
         self._error_active = False
         self._preview_height = _H_PREVIEW_MIN
@@ -367,6 +398,7 @@ class HudWindow(QFrame):
 
         self._setup_window()
         self._setup_ui()
+        self._icon_bar.language_selected.connect(self.set_language)
 
     # ── Window ──────────────────────────────────────────────────────
 
@@ -446,8 +478,8 @@ class HudWindow(QFrame):
         self._min_btn.setFixedSize(24, 24)
         self._min_btn.setIcon(lucide_icon("minus", _CLR_BTN_HV, 14))
         self._min_btn.setIconSize(QSize(14, 14))
-        self._min_btn.setToolTip("最小化 HUD")
-        self._min_btn.setAccessibleName("最小化 HUD")
+        self._min_btn.setToolTip(translate("minimize_hud", self._language))
+        self._min_btn.setAccessibleName(translate("minimize_hud", self._language))
         self._min_btn.setCursor(Qt.CursorShape.ArrowCursor)
         self._min_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._min_btn.setStyleSheet(f"""
@@ -467,8 +499,8 @@ class HudWindow(QFrame):
         self._close_btn.setFixedSize(24, 24)
         self._close_btn.setIcon(lucide_icon("x", _CLR_BTN_HV, 14))
         self._close_btn.setIconSize(QSize(14, 14))
-        self._close_btn.setToolTip("隐藏 HUD，继续监听")
-        self._close_btn.setAccessibleName("隐藏 HUD")
+        self._close_btn.setToolTip(translate("hide_hud_tooltip", self._language))
+        self._close_btn.setAccessibleName(translate("hide_hud_accessible", self._language))
         self._close_btn.setCursor(Qt.CursorShape.ArrowCursor)
         self._close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._close_btn.setStyleSheet(f"""
@@ -506,7 +538,7 @@ class HudWindow(QFrame):
         self._preview.setObjectName("PreviewArea")
         self._preview.setReadOnly(True)
         self._preview.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._preview.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self._preview.setMaximumHeight(_H_PREVIEW)
@@ -545,7 +577,7 @@ class HudWindow(QFrame):
         self._action_row.setSpacing(6)
         self._action_row.setContentsMargins(0, 0, 0, 0)
 
-        self._action_status = QLabel("当前内容无需处理")
+        self._action_status = QLabel(translate("no_action", self._language))
         self._action_status.setFont(self._font(9, False))
         self._action_status.setStyleSheet(
             f"color: {_CLR_TEXT_DIM}; padding-left: 2px;"
@@ -571,7 +603,7 @@ class HudWindow(QFrame):
         self._action_btn.clicked.connect(self._on_action_clicked)
         self._action_row.addWidget(self._action_btn)
 
-        self._more_actions_btn = QPushButton("其他操作")
+        self._more_actions_btn = QPushButton(translate("more_actions", self._language))
         self._more_actions_btn.setFixedHeight(28)
         self._more_actions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._more_actions_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -608,6 +640,39 @@ class HudWindow(QFrame):
         self._min_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._min_label.setVisible(False)
 
+    def _apply_language(self) -> None:
+        """刷新 HUD 自有控件文案；用户剪贴板正文不在此处改写。"""
+        self._icon_bar.set_language(self._language)
+        self._min_btn.setToolTip(translate("minimize_hud", self._language))
+        self._min_btn.setAccessibleName(translate("minimize_hud", self._language))
+        self._close_btn.setToolTip(translate("hide_hud_tooltip", self._language))
+        self._close_btn.setAccessibleName(translate("hide_hud_accessible", self._language))
+        self._tip_label.setText(translate("ready_tip", self._language))
+        self._action_status.setText(translate("no_action", self._language))
+        self._more_actions_btn.setText(translate("more_actions", self._language))
+        if self._output is not None:
+            self._configure_action_button(
+                getattr(self._output, "primary_action", "")
+                or getattr(self._output, "action_type", ""),
+                getattr(self._output, "available_actions", []) or [],
+            )
+
+    def language(self) -> str:
+        """返回 HUD 当前语言。"""
+        return self._language
+
+    def set_language(self, language: str) -> str:
+        """切换 HUD 文案并持久化；语言未变化时不重复发信号。"""
+        normalized = normalize_language(language)
+        if normalized == self._language:
+            return normalized
+        self._language = normalized
+        self._config["language"] = normalized
+        self._apply_language()
+        self._save_state()
+        self.language_changed.emit(normalized)
+        return normalized
+
     # ── Position ────────────────────────────────────────────────────
 
     def show_at_bottom_right(self, *, visible: bool = True):
@@ -622,6 +687,9 @@ class HudWindow(QFrame):
         from PySide6.QtWidgets import QApplication
 
         self._config = self._load_config()
+        self._language = normalize_language(self._config.get("language"))
+        self._icon_bar.set_language(self._language)
+        self._apply_language()
         sx, sy = self._config.get("x"), self._config.get("y")
         self._first_run = self._config.get("first_run", True)
         self._expanded = self._config.get("default_expand", False)
@@ -677,7 +745,7 @@ class HudWindow(QFrame):
         tip_layout.setContentsMargins(6, 2, 6, 2)
         tip_layout.setSpacing(4)
 
-        self._tip_label = QLabel("提示：已就绪，等待剪贴板内容")
+        self._tip_label = QLabel(translate("ready_tip", self._language))
         self._tip_label.setFont(self._font(9, False))
         self._tip_label.setStyleSheet(f"color: {_CLR_TIP_TEXT}; background: transparent;")
         tip_layout.addWidget(self._tip_label)
@@ -729,6 +797,7 @@ class HudWindow(QFrame):
             "default_target": self._config.get("default_target", "word"),
             "ui_width": self._width,
             "usage_tracking_enabled": self._config.get("usage_tracking_enabled", False),
+            "language": self._language,
         }
         self._save_config(config)
 
@@ -758,6 +827,7 @@ class HudWindow(QFrame):
             "default_target": "word",
             "ui_width": _W,
             "usage_tracking_enabled": False,
+            "language": DEFAULT_LANGUAGE,
         }
         try:
             if not os.path.exists(_POS_CONFIG_PATH):
@@ -779,6 +849,7 @@ class HudWindow(QFrame):
             result["ui_width"] = max(
                 _MIN_WIDTH, min(_MAX_WIDTH, result["ui_width"])
             )
+            result["language"] = normalize_language(result.get("language"))
             return result
         except Exception:
             return dict(defaults)
@@ -861,10 +932,11 @@ class HudWindow(QFrame):
 
         risk_color, dot = _RISK.get(output.risk_level, ("#cccccc", "●"))
         if output.has_binary:
-            tag = output.content_type_label or "非文本"
+            tag = output.content_type_label or translate("non_text_tag", self._language)
         else:
-            tag = CONTENT_TYPES.get(
-                output.content_type, output.content_type_label
+            tag = content_type_label(
+                output.content_type,
+                self._language,
             )
 
         # Tracker: log previous session, start new one
@@ -890,10 +962,11 @@ class HudWindow(QFrame):
         )
         self._tag.setText(tag)
 
-        risk_text, risk_text_color, risk_background = _RISK_BADGE.get(
+        _risk_text, risk_text_color, risk_background = _RISK_BADGE.get(
             output.risk_level,
             _RISK_BADGE["none"],
         )
+        risk_text = risk_label(output.risk_level, self._language)
         self._risk_badge.setText(risk_text)
         self._risk_badge.setStyleSheet(
             f"color: {risk_text_color}; background-color: {risk_background}; "
@@ -902,9 +975,9 @@ class HudWindow(QFrame):
 
         # Target display: compact label (hidden for "unknown")
         target_value = getattr(output, "target", "") or ""
-        target_label = _TARGET_LABEL.get(target_value, "")
-        if target_label:
-            self._target_lbl.setText(f" → {target_label}")
+        target_name = target_label(target_value, self._language) if target_value else ""
+        if target_name and target_value != "unknown":
+            self._target_lbl.setText(f" → {target_name}")
             self._target_lbl.setVisible(True)
         else:
             self._target_lbl.setText("")
@@ -920,7 +993,10 @@ class HudWindow(QFrame):
             content_type=output.content_type,
         )
         preview = self._preview_renderer.render(
-            content, output.target, preview_data=output.preview_data
+            content,
+            output.target,
+            preview_data=output.preview_data,
+            language=self._language,
         )
 
         self._preview.setHtml(preview.html)
@@ -949,14 +1025,14 @@ class HudWindow(QFrame):
     def _configure_action_button(self, primary: str, available: list[str]):
         """Set primary action button and "more actions" menu."""
         primary_labels = {
-            "strip_formats": "清洗为纯文本",
-            "clean_url":     "净化链接",
-            "merge_lines":   "合并为一行",
+            "strip_formats": translate("action_strip_primary", self._language),
+            "clean_url": translate("action_clean_url", self._language),
+            "merge_lines": translate("action_merge_primary", self._language),
         }
         more_labels = {
-            "strip_formats": "清洗格式",
-            "clean_url":     "净化链接",
-            "merge_lines":   "合并换行",
+            "strip_formats": translate("action_strip_more", self._language),
+            "clean_url": translate("action_clean_url", self._language),
+            "merge_lines": translate("action_merge_more", self._language),
         }
 
         self._current_action = primary if primary in primary_labels else ""
@@ -1009,7 +1085,7 @@ class HudWindow(QFrame):
         self._more_actions_menu.exec(pos)
 
     def _update_preview_height(self) -> None:
-        """让短预览保持紧凑，同时限制长内容的最大高度。"""
+        """让短预览保持紧凑，长内容受限时保留可见滚动入口。"""
         document = self._preview.document()
         document.setTextWidth(max(120, self._width - 36))
         text = document.toPlainText()
@@ -1077,7 +1153,7 @@ class HudWindow(QFrame):
         """Restore original style and refresh."""
         self._apply_style()
         if self._output:
-            tag = CONTENT_TYPES.get(self._output.content_type, self._output.content_type_label)
+            tag = content_type_label(self._output.content_type, self._language)
             self._tag.setText(f"{tag}")
 
     # ── Error Toast ──────────────────────────────────────────────────
@@ -1088,7 +1164,9 @@ class HudWindow(QFrame):
             self._restore()
 
         self._error_active = True
-        self._conclusion.setText(f"⚠ 操作失败: {message}")
+        self._conclusion.setText(
+            f"⚠ {translate('operation_failed', self._language)}: {message}"
+        )
         self._expanded = True
         self._apply_expand()
 

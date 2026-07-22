@@ -22,6 +22,11 @@ TEST_TERMINAL_TITLE = "PastePeek QA Terminal"
 _GUI_INPUT_MODE = "physical"
 _GUI_INPUT_FALLBACK_REASON = ""
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.i18n import DEFAULT_LANGUAGE, content_type_label, target_label, translate  # noqa: E402
+
 
 def reset_gui_input() -> None:
     """让每轮验收优先使用真实鼠标输入。"""
@@ -296,7 +301,7 @@ def screenshot(window, mode: str, stage: str) -> Path:
     return path
 
 
-def write_isolated_config(mode: str) -> Path:
+def write_isolated_config(mode: str, language: str = DEFAULT_LANGUAGE) -> Path:
     """创建不影响用户配置的确定性验收配置。"""
     local_appdata = RESULTS_DIR / f"state-{mode}"
     config_dir = local_appdata / "PastePeek"
@@ -310,6 +315,7 @@ def write_isolated_config(mode: str) -> Path:
         "default_target": "word",
         "ui_width": 300,
         "usage_tracking_enabled": False,
+        "language": language,
     }
     (config_dir / "config.json").write_text(
         json.dumps(config, ensure_ascii=False),
@@ -360,11 +366,15 @@ def ensure_expanded(window, *, geometry_scale: float = 1.0) -> None:
         raise last_error
 
 
-def select_auto_detection(window) -> None:
+def select_auto_detection(
+    window, *, language: str = DEFAULT_LANGUAGE
+) -> None:
     """通过真实“更多”菜单恢复自动检测。"""
     ensure_expanded(window)
     click_control(find_control(window, "…", "Button"))
-    click_control(find_desktop_control("自动检测", "MenuItem"))
+    click_control(
+        find_desktop_control(translate("auto_detect", language), "MenuItem")
+    )
 
 
 def find_test_terminal_window():
@@ -413,7 +423,12 @@ def close_process_tree(process: subprocess.Popen | None) -> None:
         process.wait(timeout=5)
 
 
-def hover_and_close(window, *, geometry_scale: float = 1.0) -> None:
+def hover_and_close(
+    window,
+    *,
+    language: str = DEFAULT_LANGUAGE,
+    geometry_scale: float = 1.0,
+) -> None:
     """悬停显示关闭按钮并通过真实按钮隐藏 HUD。"""
     rect = window.rectangle()
     move_cursor((rect.left - 20, rect.top - 20))
@@ -425,7 +440,13 @@ def hover_and_close(window, *, geometry_scale: float = 1.0) -> None:
         )
     )
     if moved:
-        click_control(find_control(window, "隐藏 HUD", "Button"))
+        click_control(
+            find_control(
+                window,
+                translate("hide_hud_accessible", language),
+                "Button",
+            )
+        )
     else:
         window.close()
     wait_until(
@@ -487,6 +508,7 @@ def run_scenario(
     command: list[str],
     *,
     check_auto: bool,
+    language: str = DEFAULT_LANGUAGE,
     geometry_scale: float = 1.0,
 ) -> dict:
     """对单个启动形态执行完整用户工作流。"""
@@ -496,12 +518,13 @@ def run_scenario(
         raise RuntimeError("测试前已有 PastePeek 窗口，请先关闭")
 
     env = os.environ.copy()
-    env["LOCALAPPDATA"] = str(write_isolated_config(mode))
+    env["LOCALAPPDATA"] = str(write_isolated_config(mode, language))
     set_clipboard_text(TEST_URL)
     process: subprocess.Popen | None = None
     terminal_process: subprocess.Popen | None = None
     stages: dict[str, object] = {
         "mode": mode,
+        "language": language,
         "geometry_scale": geometry_scale,
         "screens": monitor_work_areas(),
     }
@@ -514,7 +537,11 @@ def run_scenario(
             env=env,
         )
         window = new_pastepeek_window(existing)
-        wait_until("剪贴板文本分析", lambda: "纯文本" in visible_names(window))
+        wait_until(
+            "剪贴板文本分析",
+            lambda: content_type_label("plain_text", language)
+            in visible_names(window),
+        )
         assert_window_on_screen(window, "常态")
         stages["collapsed"] = str(screenshot(window, mode, "collapsed"))
 
@@ -524,27 +551,30 @@ def run_scenario(
 
         switch_target_with_keyboard(
             window,
-            start_control_name="浏览器",
-            start_visible_name="Chrome",
+            start_control_name=target_label("chrome", language, compact=True),
+            start_visible_name=target_label("chrome", language),
             key="{RIGHT}",
-            expected_visible_name="代码编辑器",
+            expected_visible_name=target_label("code_editor", language),
             geometry_scale=geometry_scale,
         )
         switch_target_with_keyboard(
             window,
-            start_control_name="代码",
-            start_visible_name="代码编辑器",
+            start_control_name=target_label("code_editor", language, compact=True),
+            start_visible_name=target_label("code_editor", language),
             key="{LEFT}",
-            expected_visible_name="Chrome",
+            expected_visible_name=target_label("chrome", language),
             geometry_scale=geometry_scale,
         )
 
         if check_auto:
-            select_auto_detection(window)
+            select_auto_detection(window, language=language)
             terminal_process, _terminal = start_test_terminal()
             wait_until(
                 "自动识别终端",
-                lambda: any("终端" in name for name in visible_names(window)),
+                lambda: any(
+                    target_label("terminal", language) in name
+                    for name in visible_names(window)
+                ),
             )
             stages["auto_terminal"] = str(
                 screenshot(window, mode, "auto-terminal")
@@ -553,12 +583,21 @@ def run_scenario(
             terminal_process = None
 
         ensure_expanded(window, geometry_scale=geometry_scale)
-        click_control(find_control(window, "浏览器", "CheckBox"))
+        click_control(
+            find_control(
+                window,
+                target_label("chrome", language, compact=True),
+                "CheckBox",
+            )
+        )
         wait_until(
             "操作前切换到浏览器",
-            lambda: any("Chrome" in name for name in visible_names(window)),
+            lambda: any(
+                target_label("chrome", language) in name
+                for name in visible_names(window)
+            ),
         )
-        find_control(window, "净化链接", "Button")
+        find_control(window, translate("action_clean_url", language), "Button")
         window.set_focus()
         keyboard.send_keys("{ENTER}")
         wait_until("Enter 净化链接", lambda: read_clipboard_text() == CLEAN_URL)
@@ -609,7 +648,11 @@ def run_scenario(
         assert_window_on_screen(window, "恢复态")
         stages["restored"] = str(screenshot(window, mode, "restored"))
 
-        hover_and_close(window, geometry_scale=geometry_scale)
+        hover_and_close(
+            window,
+            language=language,
+            geometry_scale=geometry_scale,
+        )
         if process.poll() is not None:
             raise AssertionError("隐藏 HUD 后应用进程不应退出")
         stages["hidden_to_tray"] = True
@@ -640,6 +683,18 @@ def main() -> None:
             "exe",
             [str(ROOT / "dist" / "PastePeek.exe")],
             check_auto=True,
+        )
+        results["source_en"] = run_scenario(
+            "source-en",
+            [sys.executable, str(ROOT / "src" / "main.py")],
+            check_auto=True,
+            language="en-US",
+        )
+        results["exe_en"] = run_scenario(
+            "exe-en",
+            [str(ROOT / "dist" / "PastePeek.exe")],
+            check_auto=True,
+            language="en-US",
         )
         results["passed"] = True
     finally:

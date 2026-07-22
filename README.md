@@ -1,10 +1,10 @@
-# PastePeek v2.0.0-rc.2
+# PastePeek v2.0.0-rc.3
 
 [English](README.en.md) | 简体中文
 
 [English changelog](CHANGELOG.en.md) | [中文变更日志](CHANGELOG.md)
 
-英文公开文档已提供；当前运行时 HUD 和系统托盘文案仍为简体中文。
+运行时默认使用简体中文，也支持从 HUD 或系统托盘切换为英文；英文版不改变剪贴板正文或安全策略。
 
 > 当前为最低预发布版（Pre-release）。已验证当前 Windows 单物理显示器环境；Windows 10、真实 per-monitor DPI、多物理显示器以及断电/强杀中的剪贴板写入结果尚未作兼容性承诺。
 
@@ -37,6 +37,12 @@ PastePeek 是一个面向 Windows 的轻量粘贴预览工具。复制内容后�
 - 以便携单文件 EXE 运行，不需要安装。
 - 支持系统托盘驻留、HUD 显隐和显式退出。
 - 支持当前用户可选开机启动，登录时静默驻留托盘。
+
+## 语言切换
+
+- 默认语言为简体中文；在 HUD 的“更多”菜单或系统托盘的“语言”菜单中选择 English 即可切换。
+- HUD、预测、预览、主动操作反馈和托盘文案会立即切换；用户复制的正文、HTML、Markdown、代码和链接参数保持原样。
+- 语言选择保存到 `%LOCALAPPDATA%\PastePeek\config.json`，下次启动继续使用；非法或缺失配置会回退到简体中文。
 
 ## 下载与运行
 

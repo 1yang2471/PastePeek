@@ -2,6 +2,13 @@
 
 [简体中文](CHANGELOG.md) | English
 
+## v2.0.0-rc.3 (Pre-release, 2026-07-22)
+
+- Added `zh-CN`/`en-US` runtime language switching in the same EXE. Simplified Chinese remains the default, and the choice is stored in `%LOCALAPPDATA%\PastePeek\config.json`.
+- Added English copy for the HUD, prediction matrix, preview checklists, active-operation success/refusal feedback, and tray menu. Clipboard text is not translated, and sequence checks, rollback behavior, and the refuse-when-uncertain safety policy are unchanged.
+- The HUD `More` menu and tray `Language` menu share one language state, refresh the current result immediately, and restore the choice after restart.
+- Long previews now show a scrollbar when they exceed the compact height, so 300px English checklists are not clipped behind a hidden scroll area.
+
 ## v2.0.0-rc.2 (Pre-release, 2026-07-20)
 
 - Replaced the application icon with a clipboard, preview eye, and risk marker composition. The transparent ICO now includes 16px through 256px sizes for the tray, window chrome, and Windows Explorer.

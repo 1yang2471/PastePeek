@@ -4,13 +4,15 @@ from PySide6.QtCore import QObject, QSignalBlocker, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 
-from src.startup import StartupManager
+from src.i18n import DEFAULT_LANGUAGE, normalize_language, translate
+from src.startup import StartupManager, StartupUnsupportedError
 
 
 class TrayController(QObject):
     """通过系统托盘控制 HUD 的可见状态。"""
 
     exit_requested = Signal()
+    language_selected = Signal(str)
 
     def __init__(
         self,
@@ -19,6 +21,7 @@ class TrayController(QObject):
         *,
         tray_available: bool | None = None,
         startup_manager: StartupManager | None = None,
+        language: str = DEFAULT_LANGUAGE,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -30,9 +33,15 @@ class TrayController(QObject):
             else tray_available
         )
         self._startup_manager = startup_manager
+        self._language = normalize_language(language)
         self._tray: QSystemTrayIcon | None = None
+        self._menu: QMenu | None = None
         self._toggle_action: QAction | None = None
         self._startup_action: QAction | None = None
+        self._language_menu: QMenu | None = None
+        self._language_menu_action: QAction | None = None
+        self._language_actions: dict[str, QAction] = {}
+        self._exit_action: QAction | None = None
         self._hud_close_connected = False
 
     def start(self) -> None:
@@ -47,12 +56,14 @@ class TrayController(QObject):
         self._tray = QSystemTrayIcon(self._icon, self)
         startup_error: OSError | None = None
         menu = QMenu()
-        self._toggle_action = QAction("隐藏 PastePeek", menu)
+        # QSystemTrayIcon 不保证持有 Python 包装对象，控制器必须保留根菜单。
+        self._menu = menu
+        self._toggle_action = QAction(menu)
         self._toggle_action.triggered.connect(self.toggle_hud)
         menu.addAction(self._toggle_action)
         self._sync_toggle_label()
         if self._startup_manager is not None:
-            self._startup_action = QAction("开机启动", menu)
+            self._startup_action = QAction(menu)
             self._startup_action.setCheckable(True)
             self._startup_action.setEnabled(self._startup_manager.supported)
             try:
@@ -63,10 +74,27 @@ class TrayController(QObject):
             self._startup_action.toggled.connect(self._set_startup_enabled)
             menu.addAction(self._startup_action)
             menu.aboutToShow.connect(self._refresh_startup_state)
+
+        # 语言菜单只负责发出选择信号，真正的持久化由 HUD 统一处理。
+        self._language_menu = menu.addMenu(translate("language_menu", self._language))
+        # PySide 需要同时持有子菜单对应的 QAction 包装对象。
+        self._language_menu_action = self._language_menu.menuAction()
+        self._language_actions = {}
+        for language, key in (("zh-CN", "language_zh"), ("en-US", "language_en")):
+            action = self._language_menu.addAction(translate(key, self._language))
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=language: self._select_language(value)
+            )
+            self._language_actions[language] = action
+
         menu.addSeparator()
-        exit_action = QAction("退出 PastePeek", menu)
-        exit_action.triggered.connect(lambda _checked=False: self.exit_requested.emit())
-        menu.addAction(exit_action)
+        self._exit_action = QAction(menu)
+        self._exit_action.triggered.connect(
+            lambda _checked=False: self.exit_requested.emit()
+        )
+        menu.addAction(self._exit_action)
+        self._refresh_menu_labels()
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._on_tray_activated)
         self._tray.setToolTip("PastePeek")
@@ -80,9 +108,43 @@ class TrayController(QObject):
             self._tray.hide()
             self._tray.deleteLater()
         self._tray = None
+        self._menu = None
         self._toggle_action = None
         self._startup_action = None
+        self._language_menu = None
+        self._language_menu_action = None
+        self._language_actions = {}
+        self._exit_action = None
         self._disconnect_hud_close()
+
+    def language(self) -> str:
+        """返回托盘当前语言。"""
+        return self._language
+
+    def set_language(self, language: str) -> str:
+        """刷新现有托盘菜单文案并返回归一化语言。"""
+        self._language = normalize_language(language)
+        self._refresh_menu_labels()
+        return self._language
+
+    def _select_language(self, language: str) -> None:
+        """处理菜单选择，并把语言切换交给 HUD 统一持久化。"""
+        normalized = self.set_language(language)
+        self.language_selected.emit(normalized)
+
+    def _refresh_menu_labels(self) -> None:
+        """集中刷新菜单标题、操作标签和当前语言勾选状态。"""
+        self._sync_toggle_label()
+        if self._startup_action is not None:
+            self._startup_action.setText(translate("tray_startup", self._language))
+        if self._exit_action is not None:
+            self._exit_action.setText(translate("tray_exit", self._language))
+        if self._language_menu is not None:
+            self._language_menu.setTitle(translate("language_menu", self._language))
+        for language, action in self._language_actions.items():
+            key = "language_zh" if language == "zh-CN" else "language_en"
+            action.setText(translate(key, self._language))
+            action.setChecked(language == self._language)
 
     def toggle_hud(self) -> None:
         """在显示和隐藏 HUD 之间切换。"""
@@ -113,8 +175,8 @@ class TrayController(QObject):
         """让菜单命令描述下一次操作。"""
         if self._toggle_action is None:
             return
-        text = "隐藏 PastePeek" if self._hud.isVisible() else "显示 PastePeek"
-        self._toggle_action.setText(text)
+        key = "tray_hide" if self._hud.isVisible() else "tray_show"
+        self._toggle_action.setText(translate(key, self._language))
 
     def _connect_hud_close(self) -> None:
         """连接 HUD 的关闭请求。"""
@@ -170,9 +232,16 @@ class TrayController(QObject):
         """通过托盘显示不阻塞应用的本地错误。"""
         if self._tray is None:
             return
+        if isinstance(error, StartupUnsupportedError):
+            message = translate("startup_unsupported", self._language)
+        elif self._language == "en-US":
+            # Windows 本地异常文本受系统显示语言影响，英文模式不混入它。
+            message = translate("startup_error", self._language)
+        else:
+            message = translate("startup_error", self._language, error=error)
         self._tray.showMessage(
             "PastePeek",
-            f"开机启动设置失败：{error}",
+            message,
             QSystemTrayIcon.MessageIcon.Warning,
             5000,
         )

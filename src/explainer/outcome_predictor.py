@@ -15,6 +15,12 @@ Lookup strategy:
   2. _OUTCOME_MAP[content_type]                     — fallback (Word default)
 """
 
+from src.i18n import (
+    DEFAULT_LANGUAGE,
+    content_type_label,
+    normalize_language,
+    translate,
+)
 from src.models.types import CONTENT_TYPES, AppOutput
 
 # ── Static mapping: content_type → per-target outcome ─────────────────
@@ -402,7 +408,246 @@ _RISK_LABELS: dict[str, str] = {
 _REAL_RENDER_TARGETS: set[str] = {"chrome", "markdown_editor", "terminal", "code_editor"}
 
 
-def _build_preview_data(entry: dict, content_type: str, target: str) -> dict:
+# 英文矩阵与中文矩阵使用相同的键、风险等级和动作语义。中文表仍是默认
+# 资源，避免改变既有调用方和发布版本的显示结果。
+_ENGLISH_OUTCOME_MAP: dict[str, dict] = {
+    "rich_text": {
+        "risk_level": "medium",
+        "prediction": "Formatting may break in Word",
+        "why": "HTML structures such as <ul>/<ol>/<table> use different Word parsing rules",
+        "suggestion": "Use Ctrl+Shift+V to paste as plain text",
+        "breakdown": [
+            "List indentation may be lost",
+            "Horizontal rules may become paragraph borders",
+            "Font styles may be stripped",
+        ],
+    },
+    "plain_text": {
+        "risk_level": "none",
+        "prediction": "Pastes normally in all scenarios",
+        "why": "Only plain-text characters are present; no hidden formatting markers",
+        "suggestion": "Paste directly with Ctrl+V",
+        "breakdown": [],
+    },
+    "structured_text": {
+        "risk_level": "low",
+        "prediction": "Indentation and lists may change in Word",
+        "why": "Markdown markers (#/-/*) were detected, but Word does not parse them",
+        "suggestion": "Use Ctrl+Shift+V, then adjust indentation manually",
+        "breakdown": ["List indentation may shift", "Heading styles may be lost"],
+    },
+    "code": {
+        "risk_level": "low",
+        "prediction": "Indentation and formatting may be lost in Word",
+        "why": "Code patterns such as def/class/import were detected; Word may reflow spaces",
+        "suggestion": "Use Ctrl+Shift+V to preserve the original indentation",
+        "breakdown": ["Space indentation may be lost", "Syntax highlighting is not preserved"],
+    },
+}
+
+
+def _english_entry(
+    risk_level: str,
+    prediction: str,
+    why: str,
+    suggestion: str,
+    breakdown: list[str] | None = None,
+) -> dict:
+    return {
+        "risk_level": risk_level,
+        "prediction": prediction,
+        "why": why,
+        "suggestion": suggestion,
+        "breakdown": list(breakdown or []),
+    }
+
+
+_ENGLISH_COMPATIBILITY_MATRIX: dict[tuple[str, str], dict] = {
+    ("rich_text", "word"): _english_entry(
+        "medium",
+        "Formatting may break in Word",
+        "HTML structures such as <ul>/<ol>/<table> use different Word parsing rules",
+        "Use Ctrl+Shift+V to paste as plain text",
+        ["List indentation may be lost", "Horizontal rules may become paragraph borders", "Font styles may be stripped"],
+    ),
+    ("rich_text", "chrome"): _english_entry(
+        "low",
+        "Formatting is usually preserved in the browser",
+        "Chrome supports HTML paste natively, so the rendered structure is consistent",
+        "Paste directly with Ctrl+V",
+    ),
+    ("rich_text", "code_editor"): _english_entry(
+        "high",
+        "The code editor pastes plain text; rich-text structure may change",
+        "Code editors usually read clipboard text and ignore HTML tags",
+        "Paste and check lists, tables, and line breaks",
+        ["Rich-text styles are removed", "Lists and tables become ordinary text", "Multi-part content may not suit source code"],
+    ),
+    ("plain_text", "word"): _english_entry(
+        "none", "Pastes normally in Word", "Only plain-text characters are present; no hidden formatting markers", "Paste directly with Ctrl+V"
+    ),
+    ("plain_text", "chrome"): _english_entry(
+        "none", "Pastes normally in the browser", "Plain text is handled consistently by applications", "Paste directly with Ctrl+V"
+    ),
+    ("plain_text", "code_editor"): _english_entry(
+        "none", "Pastes normally in the code editor", "Plain text is fully compatible with code editors", "Paste directly with Ctrl+V"
+    ),
+    ("structured_text", "word"): _ENGLISH_OUTCOME_MAP["structured_text"],
+    ("structured_text", "chrome"): _english_entry(
+        "low",
+        "The browser input does not parse Markdown",
+        "Markdown markers (#/-/*) are displayed literally in most browser input fields",
+        "Confirm Markdown support; otherwise use Ctrl+Shift+V",
+        ["Headings may show as literal # text", "List markers may not render as lists"],
+    ),
+    ("structured_text", "code_editor"): _english_entry(
+        "low", "Displays normally in the code editor", "Markdown is plain text and code editors handle it consistently", "Paste directly with Ctrl+V"
+    ),
+    # Word 对代码的格式风险高于通用回退，保持与中文矩阵的目标级别一致。
+    ("code", "word"): {**_ENGLISH_OUTCOME_MAP["code"], "risk_level": "medium"},
+    ("code", "chrome"): _english_entry(
+        "low",
+        "Indentation may be lost in a browser input",
+        "Browser text fields handle leading spaces inconsistently",
+        "Check indentation after pasting and repair it if needed",
+        ["Leading spaces may be trimmed"],
+    ),
+    ("code", "code_editor"): _english_entry(
+        "none", "Pastes normally in the code editor", "Code editors natively support indentation and highlighting", "Paste directly with Ctrl+V"
+    ),
+    ("rich_text", "terminal"): _english_entry(
+        "high",
+        "The terminal pastes plain text; line breaks may execute commands",
+        "Terminals read clipboard text; rich-text styles are lost and line breaks can trigger commands",
+        "Check the plain text in an editor before pasting line by line",
+        ["Rich-text styles such as fonts, colors, and links are lost", "Lists and tables become ordinary text", "Multi-line content may execute automatically"],
+    ),
+    ("plain_text", "terminal"): _english_entry(
+        "low",
+        "Pastes normally in the terminal, but multi-line text may execute",
+        "The terminal accepts plain text; each line may be treated as a separate command",
+        "Review multi-line content in an editor before pasting",
+        ["Multiple lines may execute one by one", "A trailing line break may run the command"],
+    ),
+    ("structured_text", "terminal"): _english_entry(
+        "medium",
+        "The terminal does not parse Markdown and multi-line text may execute",
+        "Markdown markers are not parsed, and terminal line handling may execute each line",
+        "Use Ctrl+Shift+V and review every line before pasting",
+        ["Heading and list markers appear literally", "Each line may be interpreted as a command"],
+    ),
+    ("code", "terminal"): _english_entry(
+        "medium",
+        "Code may be interpreted as commands in the terminal",
+        "Detected code patterns are interpreted line by line and could execute unexpectedly",
+        "Use a complete script file instead of pasting code line by line",
+        ["Code lines may execute separately", "Characters such as $, |, and > can invoke shell features"],
+    ),
+    ("rich_text", "chat_app"): _english_entry(
+        "low",
+        "Formatting is mostly preserved in chat apps; images may become files",
+        "Chat apps usually support some rich text, but embedded images need separate handling",
+        "Paste directly; upload the image manually if needed",
+        ["Embedded images may be lost or sent as files", "Tables may collapse into plain text"],
+    ),
+    ("plain_text", "chat_app"): _english_entry(
+        "none", "Pastes normally in chat apps", "Plain text is fully compatible with chat applications", "Paste directly with Ctrl+V"
+    ),
+    ("structured_text", "chat_app"): _english_entry(
+        "low",
+        "Markdown may appear as source text in chat apps",
+        "Markdown markers were detected; most chat apps do not render them automatically",
+        "Confirm Markdown support (for example Slack or Discord); otherwise use Ctrl+Shift+V",
+        ["Heading markers may remain literal", "List markers may not render as lists", "Code fences may remain visible"],
+    ),
+    ("code", "chat_app"): _english_entry(
+        "low",
+        "Code formatting may be lost in chat apps",
+        "Chat apps do not preserve code indentation and syntax highlighting consistently",
+        "Wrap the code in a code block or send it as a file",
+        ["Indentation may be trimmed", "Syntax highlighting is lost", "Use triple backticks for a code block"],
+    ),
+    ("rich_text", "markdown_editor"): _english_entry(
+        "medium",
+        "Markdown editors usually convert basic rich text to Markdown",
+        "Editors such as Typora and Obsidian convert common headings, lists, and emphasis differently",
+        "Paste directly, then check tables, nested lists, and images",
+        ["Headings, lists, and emphasis are usually converted", "Complex tables and nested lists may need edits", "Inline styles and class attributes are not preserved"],
+    ),
+    ("plain_text", "markdown_editor"): _english_entry(
+        "none", "Pastes normally in the Markdown editor", "Plain text is fully compatible with Markdown editors", "Paste directly with Ctrl+V"
+    ),
+    ("structured_text", "markdown_editor"): _english_entry(
+        "none", "Pastes cleanly in the Markdown editor", "Markdown editors natively support #/-/* syntax", "Paste directly with Ctrl+V; no extra cleanup is needed"
+    ),
+    ("code", "markdown_editor"): _english_entry(
+        "low",
+        "Pastes normally in a Markdown editor; a code block is recommended",
+        "Code can be pasted as text, but a fenced block is needed to preserve formatting",
+        "Paste, then use Ctrl+K or add code fences manually",
+        ["Wrap code in triple backticks for highlighting", "Use backticks for inline code"],
+    ),
+    ("rich_text", "spreadsheet"): _english_entry(
+        "high",
+        "Columns may shift and line breaks may create extra rows",
+        "HTML tables and lists have complex column mapping and line-break behavior in spreadsheets",
+        "Paste as plain text, then adjust columns or use Text to Columns",
+        ["HTML tables may collapse into one column", "Line breaks inside cells may move to the next row", "Tab-separated data may need Text to Columns"],
+    ),
+    ("plain_text", "spreadsheet"): _english_entry(
+        "low",
+        "Pastes normally in spreadsheets; Tab-separated data splits into columns",
+        "Tabs map to columns and line breaks map to rows for plain text",
+        "Paste directly; use Text to Columns when separators are missing",
+        ["Automatic columns require Tab separators", "Comma-separated data may not split automatically"],
+    ),
+    ("structured_text", "spreadsheet"): _english_entry(
+        "medium",
+        "Markdown markers are not parsed; list items may become separate rows",
+        "Markdown list markers map poorly to spreadsheet rows and cells",
+        "Use Text to Columns or organize the list in an editor first",
+        ["Each list item may occupy its own row", "Heading markers do not change font size automatically"],
+    ),
+    ("code", "spreadsheet"): _english_entry(
+        "medium",
+        "Code indentation is lost and lines map to spreadsheet rows",
+        "Spreadsheet paste treats each code line as a row and does not preserve highlighting",
+        "Avoid pasting code into a spreadsheet; use Ctrl+Shift+V only when necessary",
+        ["Spaces and tabs may be lost in cells", "Syntax highlighting is lost", "Keep code in a code editor instead"],
+    ),
+    ("rich_text", "presentation"): _english_entry(
+        "medium",
+        "Fonts may change and text boxes may overflow in presentations",
+        "Presentation apps use local fonts; unavailable fonts fall back to system defaults",
+        "Check fonts and text-box size after pasting; use Keep Source Formatting if needed",
+        ["Unavailable fonts may fall back", "Text may overflow its box", "Paragraph spacing differs from web pages"],
+    ),
+    ("plain_text", "presentation"): _english_entry(
+        "none", "Pastes normally in presentations", "Plain text is fully compatible with presentation apps", "Paste directly with Ctrl+V and adjust the font if needed"
+    ),
+    ("structured_text", "presentation"): _english_entry(
+        "medium",
+        "Markdown is shown as source text in presentations",
+        "Presentation apps do not render Markdown markers automatically",
+        "Format the text in Word first or adjust the slide layout manually",
+        ["Heading markers remain ordinary text", "List markers appear on the slide", "Code fences are not formatted"],
+    ),
+    ("code", "presentation"): _english_entry(
+        "low",
+        "Code pastes as plain text without highlighting",
+        "Presentation apps do not provide code syntax highlighting by default",
+        "Paste as plain text and set a monospaced font manually",
+        ["Syntax highlighting is lost", "Indentation is retained but needs a monospaced font"],
+    ),
+}
+
+
+def _build_preview_data(
+    entry: dict,
+    content_type: str,
+    target: str,
+    language: str = DEFAULT_LANGUAGE,
+) -> dict:
     """Build scenario preview metadata from an outcome entry.
 
     Returns:
@@ -411,7 +656,7 @@ def _build_preview_data(entry: dict, content_type: str, target: str) -> dict:
     breakdown = entry.get("breakdown", [])
     risks = list(breakdown)
     if not risks:
-        risks = ["当前内容在该场景下风险较低"]
+        risks = [translate("low_risk_note", language)]
 
     render_type = "real" if target in _REAL_RENDER_TARGETS else "checklist"
 
@@ -436,24 +681,42 @@ class OutcomePredictor:
     """
 
     def generate(
-        self, content_type: str, target: str = "word",
+        self,
+        content_type: str,
+        target: str = "word",
+        language: str = DEFAULT_LANGUAGE,
     ) -> AppOutput:
+        language = normalize_language(language)
         # 1. Matrix lookup (content_type × target) — specific
         matrix_key = (content_type, target)
-        if matrix_key in COMPATIBILITY_MATRIX:
+        if language == "en-US" and matrix_key in _ENGLISH_COMPATIBILITY_MATRIX:
+            entry = _ENGLISH_COMPATIBILITY_MATRIX[matrix_key]
+        elif matrix_key in COMPATIBILITY_MATRIX:
             entry = COMPATIBILITY_MATRIX[matrix_key]
         else:
             # 2. Fallback: content_type-only default (Word behavior)
-            entry = _OUTCOME_MAP.get(content_type)
+            entry = (
+                _ENGLISH_OUTCOME_MAP.get(content_type)
+                if language == "en-US"
+                else _OUTCOME_MAP.get(content_type)
+            )
 
         if entry is None:
-            entry = _OUTCOME_MAP["plain_text"]
+            entry = (
+                _ENGLISH_OUTCOME_MAP["plain_text"]
+                if language == "en-US"
+                else _OUTCOME_MAP["plain_text"]
+            )
             content_type = "plain_text"
 
-        type_label = CONTENT_TYPES.get(content_type, content_type)
+        type_label = (
+            content_type_label(content_type, language)
+            if language == "en-US"
+            else CONTENT_TYPES.get(content_type, content_type)
+        )
         risk_label = _RISK_LABELS.get(entry["risk_level"], "●")
 
-        preview_data = _build_preview_data(entry, content_type, target)
+        preview_data = _build_preview_data(entry, content_type, target, language)
 
         return AppOutput(
             risk_level=entry["risk_level"],
