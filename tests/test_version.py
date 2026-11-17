@@ -1,11 +1,11 @@
 """公开版本号的单一来源测试。"""
 
 
-def test_public_version_is_release_candidate():
-    """首次公开版本必须使用预发布版本号。"""
+def test_public_version_is_stable():
+    """公开版本号单一来源断言：v2.0.0 正式版。"""
     from src.version import __version__
 
-    assert __version__ == "2.0.0-rc.3"
+    assert __version__ == "2.0.0"
 
 
 def test_build_uses_windows_version_resource_with_public_metadata(tmp_path):

@@ -1,10 +1,10 @@
-# PastePeek v2.0.0-rc.3
+# PastePeek v2.0.0
 
 [简体中文](README.md) | English
 
 [English changelog](CHANGELOG.en.md) | [中文变更日志](CHANGELOG.md)
 
-> This is the minimum public pre-release. It has been verified on the current Windows single-monitor environment. Windows 10, real per-monitor DPI, multiple physical monitors, and clipboard writes interrupted by power loss or forced termination are not compatibility commitments for this release.
+> Verified scope: Windows 11 single physical monitor (100% and Qt process-level 125%/150%/200% scaling). Windows 10, real per-monitor DPI, multiple physical monitors, and clipboard writes interrupted by power loss or forced termination are outside the compatibility commitment for this release.
 
 PastePeek is a lightweight Windows clipboard paste-preview tool. After you copy content, it shows the content type, the current target application, and paste risks in a small HUD near the desktop corner. Expand the HUD to compare target scenarios, inspect an approximate paste result, and optionally clean a URL, strip formatting, or merge line breaks.
 

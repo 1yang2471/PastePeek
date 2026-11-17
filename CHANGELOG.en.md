@@ -2,6 +2,11 @@
 
 [简体中文](CHANGELOG.md) | English
 
+## v2.0.0 (Stable, 2026-11-18)
+
+- No code changes since rc.3: the rc.3 baseline passed 783 automated regressions (0 failures) and is promoted to stable.
+- The compatibility-scope statement is kept: verified on Windows 11 single physical monitor (100% and Qt process-level 125%/150%/200% scaling); Windows 10, real per-monitor DPI, multiple physical monitors, and clipboard writes interrupted by power loss or forced termination remain outside the commitment.
+
 ## v2.0.0-rc.3 (Pre-release, 2026-07-22)
 
 - Added `zh-CN`/`en-US` runtime language switching in the same EXE. Simplified Chinese remains the default, and the choice is stored in `%LOCALAPPDATA%\PastePeek\config.json`.

@@ -13,6 +13,7 @@ and position memory across screens.
 import json
 import os
 from math import ceil
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QEnterEvent, QFont, QIcon, QMouseEvent
@@ -802,11 +803,21 @@ class HudWindow(QFrame):
         self._save_config(config)
 
     def _save_config(self, config: dict):
-        """Save full configuration dict to config.json."""
+        """Save full configuration dict to config.json.
+
+        写入前做目录遏制校验（resolve + relative_to）：resolve 后的路径必须
+        仍在 PastePeek 配置目录内，越界即放弃保存，绝不越目录写。
+        """
         try:
             os.makedirs(_POS_CONFIG_DIR, exist_ok=True)
             self._config.update(config)
-            with open(_POS_CONFIG_PATH, "w", encoding="utf-8") as f:
+            base = Path(_POS_CONFIG_DIR).resolve()
+            target = Path(_POS_CONFIG_PATH).resolve()
+            try:
+                target.relative_to(base)
+            except ValueError:
+                return  # escaped the allowed directory: never write outside
+            with target.open("w", encoding="utf-8") as f:
                 json.dump(self._config, f)
         except Exception:
             pass  # never block UI for config write failures

@@ -208,19 +208,19 @@ def test_english_public_docs_are_complete():
     assert "SECURITY.en.md" in english_readme
 
 
-def test_runtime_language_release_materials_match_rc3():
-    """rc.3 发布材料必须说明运行时语言切换且保持中英文同步。"""
+def test_runtime_language_release_materials_match_stable():
+    """正式版发布材料必须说明运行时语言切换且保持中英文同步。"""
     chinese_readme = (ROOT / "README.md").read_text(encoding="utf-8")
     english_readme = (ROOT / "README.en.md").read_text(encoding="utf-8")
     chinese_changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     english_changelog = (ROOT / "CHANGELOG.en.md").read_text(encoding="utf-8")
 
-    assert "# PastePeek v2.0.0-rc.3" in chinese_readme
-    assert "# PastePeek v2.0.0-rc.3" in english_readme
+    assert "# PastePeek v2.0.0" in chinese_readme
+    assert "# PastePeek v2.0.0" in english_readme
     assert "## 语言切换" in chinese_readme
     assert "## Runtime Language" in english_readme
-    assert "## v2.0.0-rc.3" in chinese_changelog
-    assert "## v2.0.0-rc.3" in english_changelog
+    assert "## v2.0.0（正式版" in chinese_changelog
+    assert "## v2.0.0 (Stable" in english_changelog
     assert "语言切换" in chinese_changelog
     assert "runtime language" in english_changelog.lower()
 
